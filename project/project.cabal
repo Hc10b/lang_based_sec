@@ -25,9 +25,7 @@ source-repository head
 
 library
   exposed-modules:
-      IvansTemplate
       Lib
-      Simple
   other-modules:
       Paths_project
   hs-source-dirs:
