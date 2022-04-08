@@ -1,11 +1,11 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE Safe #-}
---{-# LANGUAGE RankNTypes #-}
---{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleContexts #-}
+--{-# LANGUAGE RankNTypes #-}
+--{-# LANGUAGE MultiParamTypeClasses #-}
+--{-# LANGUAGE UndecidableInstances #-}
 --{-# LANGUAGE DatatypeContexts #-}
 --{-# LANGUAGE TypeFamilies #-}
 --{-# LANGUAGE DataKinds #-}
@@ -16,11 +16,28 @@ import Control.Monad.Reader
 --import qualified Data.Functor
 import Data.Functor
 
+-- * Classes
+class Interactive m where
+    outputI :: String -> m ()
+    readI :: m String
+
+class ClientState s m where
+    putC :: s -> m ()
+    getC :: m s
+
+class Monad m => Medium m where
+    send :: String -> m String
+    recv :: m String
+
+-- * Protocol definition
+
 -- The monad where everything will be happening
 data Protocol a b ma mb z where
     Preshared :: z -> Protocol a b ma mb z
     SendA2B :: (Show z, Read z) => (a -> ma z) -> Protocol a b ma mb z
     SendB2A :: (Show z, Read z) => (b -> mb z) -> Protocol a b ma mb z
+    -- ComputeA :: (Protocol a b ma mb z) -> (z -> ma y) -> Protocol a b ma mb y
+    -- ComputeB :: (Protocol a b ma mb z) -> (z -> mb y) -> Protocol a b ma mb y
     BindP :: (Protocol a b ma mb z) -> (z -> Protocol a b ma mb x) -> Protocol a b ma mb x
 
 instance Functor (Protocol a b ma mb) where
@@ -35,7 +52,15 @@ instance Monad (Protocol a b ma mb) where
     Preshared a >>= f = f a
     m >>= f = BindP m f
 
--- Some primitives to write programs inside ProtocolM
+
+-- todo
+-- - interaction with enviorment
+-- - lit + checking + computation
+
+  --SendA2BLit
+
+
+-- * Example protocols
 
 -- An example program written in ProtoM could look like
 --example :: Program Int [Int] Int ()
@@ -44,25 +69,6 @@ example = do
   iPub <- SendA2B return
   xPub <- SendB2A (\l -> let x = l !! iPub in return x)
   return (xPub, ())
-
-
-class Interactive m where
-    outputI :: String -> m ()
-    readI :: m String
-
-class ClientState s m where
-    putC :: s -> m ()
-    getC :: m s
-
-instance ClientState s (DuplexStore s) where
-    putC cs = do
-        (txs, rxs, msgs, _, io) <- get
-        put (txs, rxs, msgs, cs, io)
-    getC = do
-        (txs, rxs, msgs, cs, io) <- get
-        return cs
-
-
 
 -- this is flawful because single-dots are recognized as end of message
 type ClientS = [[String]]
@@ -121,14 +127,9 @@ smtpWithFlaw = do
 -- “You can't rely on all smtp servers doing the dot removal correctly.”
 -- — https://stackoverflow.com/questions/15224224/smtp-dot-stuffing-when-and-where-to-do-it
 
--- todo
--- - interaction with enviorment
--- - lit + checking + computation
 
-  --SendA2BLit
-  -- repeat = (SendA2B msg >> repeat) <|> SendA2BLit "\n.\n"
-  --(SendA2B "NextMessage" >> sMTP) <|> (SendA2B "QUIT" >> SENDB2A "QUIT")
-
+-- * Simulation
+-- ** Direct simulation
 {-
 simulateProgram :: Protocol a b IO z -> a -> b -> IO z
 simulateProgram p ad bd = simulateProtocol p where
@@ -140,22 +141,19 @@ simulateProgram p ad bd = simulateProtocol p where
         simulateProgram (f z) ad bd
         -}
 
+-- ** Simulation of communication
 
--- >>> simulateProgram example (AData 1) (BData ([1,2,3]))
--- ProgressCancelledException
-
--- And there will also be function to decompose values of ProtocolM into the actual algorithms for A and B:
-
-{-instance MonadIO m => Interactive m where
-    readI = liftIO readLn 
-    outputI = liftIO . putStrLn-}
-
-class Monad m => Medium m where
-    send :: String -> m String
-    recv :: m String
-
+-- * Types for simulation
 type DuplexStore cs = State ([String], [String], [String], cs, IO ())
 --type DuplexStore cs = StateT cs (StateT ([String], [String]) (StateT [String] (StateT IO ())))))
+
+instance ClientState s (DuplexStore s) where
+    putC cs = do
+        (txs, rxs, msgs, _, io) <- get
+        put (txs, rxs, msgs, cs, io)
+    getC = do
+        (txs, rxs, msgs, cs, io) <- get
+        return cs
 
 instance Interactive (DuplexStore cs) where
     readI = do
@@ -165,8 +163,6 @@ instance Interactive (DuplexStore cs) where
     outputI msg = do
         (txs, rxs, msgs, cs, io) <- get
         put (txs, txs, msgs, cs, io >> putStrLn msg)
-
-
 
 instance Medium (DuplexStore cs) where
     send msg = do
@@ -178,6 +174,7 @@ instance Medium (DuplexStore cs) where
         put (txs, tail rxs, msgs, cs, io >> putStrLn ("A receives " ++ head rxs))
         return $ head rxs
 
+-- And there will also be function to decompose values of ProtocolM into the actual algorithms for A and B:
 algoA :: Medium ma => Protocol a b ma mb z -> a -> ma z
 algoA (Preshared a) _ = return a
 algoA (SendA2B f) ad = do
@@ -201,14 +198,11 @@ algoB (BindP pz f) ad = do
     algoB (f z) ad
 
 -- And you can obtain the programs for our example by doing:
-clientA d example = algoA example d
-
---clientB :: Channel ch m => BData [Int] -> ch -> m ()
-clientB d example = algoB example d
+--clientA d = algoA example d
 
 simulateCommunication :: DuplexStore ClientS a -> DuplexStore ClientS b -> IO (a,b)
 simulateCommunication clA clB =
-    let (resA, (a2bs, _, _, _, iosA)) = runState clA ([]::[String],b2as::[String], ["some message", "another message","and on another leevel"], [], return ()::IO ())
+    let (resA, (a2bs, _, _, _, iosA)) = runState clA ([]::[String],b2as::[String], ["some message", "another message","and on another level"], [], return ()::IO ())
         (resB, (b2as, _, _, _, iosB)) = runState clB ([]::[String],a2bs::[String], [], [[]],return ()::IO ())
     in do
         putStrLn "Messages A→B:"
@@ -224,7 +218,11 @@ simulateCommunication clA clB =
 
 --simulateExample = simulateCommunication (clientA 1 example) (clientB [1,2,3] example)
 
-simulateCom prot ad bd = simulateCommunication (clientA ad prot) (clientB bd prot)
+simulateCom prot ad bd = simulateCommunication (algoA prot ad) (algoB prot bd)
 simulateSMTP msgs = simulateCom smtpWithFlaw msgs undefined
 
 smtpExampleShowingFlaw = simulateSMTP [["hi", "", "this is just a short message"], ["the next line is only a dot",".","and this line is dropped symmetrically"]]
+
+{-instance MonadIO m => Interactive m where
+    readI = liftIO readLn 
+    outputI = liftIO . putStrLn-}

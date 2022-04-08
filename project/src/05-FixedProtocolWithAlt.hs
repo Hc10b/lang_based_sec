@@ -84,6 +84,9 @@ example = do
   xPub <- SendB2A (\(BData l) -> let x = l !! iPub in x)
   return (xPub, ())
 
+
+
+
 -- this is flawful because single-dots are recognized as end of message
 smtpWithFlaw = do
     greeting
