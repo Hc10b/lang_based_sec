@@ -199,26 +199,11 @@ flipProt (Preshared a) = Preshared a
 
 algoB :: Monad mb => Protocol ma mb z -> mb z
 algoB p = algoA $ flipProt p
-{-
-algoB :: Monad mb => Protocol ma mb z -> mb z
-algoB (Preshared a) = return a
-algoB (SendB2A f) = do 
-    z <- f 
-    str <- send (show z)
-    return (read str)
---algoB (SendA2B _) ad = recv <&> read
-algoB (BindP pz f) = do
-    z <- algoB pz
-    algoB (f z)
-    -}
 
--- And you can obtain the programs for our example by doing:
---clientA d = algoA example d
-
-simulateCommunication :: Protocol (DuplexStore sa) (DuplexStore sb) z -> sa -> sb -> IO z
-simulateCommunication prot sa sb=
-    let (resA, (a2bs, _, _, _, iosA)) = runState (algoA prot) ([]::[String],b2as::[String], ["some message", "another message","and on another level"], sa, return ()::IO ())
-        (resB, (b2as, _, _, _, iosB)) = runState (algoB prot) ([]::[String],a2bs::[String], [], sb,return ()::IO ())
+simulateCommunication :: Protocol (DuplexStore sa) (DuplexStore sb) z -> [String] -> [String] -> sa -> sb -> IO (z,z)
+simulateCommunication prot inp1 inp2 sa sb=
+    let (resA, (a2bs, _, _, _, iosA)) = runState (algoA prot) ([]::[String],b2as::[String], inp1, sa, return ()::IO ())
+        (resB, (b2as, _, _, _, iosB)) = runState (algoB prot) ([]::[String],a2bs::[String], inp2, sb, return ()::IO ())
     in do
         putStrLn "Messages A→B:"
         print a2bs
@@ -228,10 +213,10 @@ simulateCommunication prot sa sb=
         iosA
         putStrLn "IO B:"
         iosB
-        return resA
+        return (resA, resB)
 
 
-smtpExampleShowingFlaw = simulateCommunication smtpWithFlaw [["hi", "", "this is just a short message"], ["the next line is only a dot",".","and this line is dropped symmetrically"]]
+smtpExampleShowingFlaw = simulateCommunication smtpWithFlaw [] [] [["hi", "", "this is just a short message"], ["the next line is only a dot",".","and this line is dropped symmetrically"]]
 
 {-instance MonadIO m => Interactive m where
     readI = liftIO readLn 
