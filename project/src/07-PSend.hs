@@ -37,12 +37,19 @@ data Protocol ma mb z where
     BindP :: Protocol ma mb z -> (z -> Protocol ma mb x) -> Protocol ma mb x
     -- simple message passing
     SendA2B :: (Medium ma, Medium mb, Show z, Read z) => ma z -> Protocol ma mb z
+    --                                                      L send result
     SendB2A :: (Medium ma, Medium mb, Show z, Read z) => mb z -> Protocol ma mb z
     -- inject data into monads
     LiftA :: (y -> ma ()) -> Protocol ma mb z
+    --        L push public data into client monad
     LiftB :: (y -> mb ()) -> Protocol ma mb z
     -- possible sychronized concurrent messages of both sides
     PSend :: (Medium ma, Medium mb, Show x, Show y) => ma (Maybe x) -> mb (Maybe y) -> (y -> Maybe (ma x)) -> (x -> Maybe (mb y)) -> Protocol ma mb (x, y)
+    --                                                  ^               ^                      ^                        ^
+    --                                                  |               |                      |                        L PartyB's response to PartA's message if PartyB hasn't send by now. May refuse to answer.
+    --                                                  |               |                      L PartyA's response to PartB's message if PartyA hasn't send by now. May refuse to answer.
+        --                                              |               L For asking whether (Maybe) and what (y) to send for partB.
+        --                                              L For asking whether (Maybe) and what (y) to send for partA.
     -- -- possible async concurrent messages of both side with possibility to return resync
     -- -- e.g. for live multiplayer game
     -- Async :: (Bool -> ma (Maybe ca)) -> (Bool -> mb (Maybe cb)) -> (ca -> mb ()) -> (cb -> ma ()) -> (ca -> Bool) -> (cb -> Bool) -> Protocol ma mb (ca, cb)
