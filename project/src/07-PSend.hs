@@ -37,7 +37,6 @@ data Protocol ma mb z where
     BindP :: Protocol ma mb z -> (z -> Protocol ma mb x) -> Protocol ma mb x
     -- simple message passing
     SendA2B :: (Medium ma, Medium mb, Show z, Read z) => ma z -> Protocol ma mb z
-    --                                                      L send result
     SendB2A :: (Medium ma, Medium mb, Show z, Read z) => mb z -> Protocol ma mb z
     -- inject data into monads
     LiftA :: (y -> ma ()) -> Protocol ma mb z
@@ -48,11 +47,20 @@ data Protocol ma mb z where
     --                                                  ^               ^                      ^                        ^
     --                                                  |               |                      |                        L PartyB's response to PartA's message if PartyB hasn't send by now. May refuse to answer.
     --                                                  |               |                      L PartyA's response to PartB's message if PartyA hasn't send by now. May refuse to answer.
-        --                                              |               L For asking whether (Maybe) and what (y) to send for partB.
-        --                                              L For asking whether (Maybe) and what (y) to send for partA.
+    --                                                  |               L For asking whether (Maybe) and what (y) to send for partB.
+    --                                                  L For asking whether (Maybe) and what (y) to send for partA.
+    --
     -- -- possible async concurrent messages of both side with possibility to return resync
     -- -- e.g. for live multiplayer game
     -- Async :: (Bool -> ma (Maybe ca)) -> (Bool -> mb (Maybe cb)) -> (ca -> mb ()) -> (cb -> ma ()) -> (ca -> Bool) -> (cb -> Bool) -> Protocol ma mb (ca, cb)
+    -- --                ^                           ^                      ^                ^                 ^                ^
+    -- --                |                           |                      |                |                 |                L Whether B's message is a sync request
+    -- --                |                           |                      |                |                 L Whether A's message is a sync request
+    -- --                |                           |                      |                L Processing a message from B on A's side
+    -- --                |                           |                      L Processing a message from A on B's side
+    -- --                |                           L Given whether party A want to sync, whether and what B want's to send.
+    -- --                L Given whether party B want to sync, whether and what A want's to send.
+
 
 instance Functor (Protocol ma mb) where
     f `fmap` mx = f <$> mx
@@ -192,10 +200,10 @@ instance Medium (DuplexStore cs) where
 -- And there will also be function to decompose values of ProtocolM into the actual algorithms for A and B:
 algoA :: Monad ma => Protocol ma mb z -> ma z
 algoA (Preshared a) = return a
-{-algoA (SendA2B f) ad = do
-    z <- f ad
+algoA (SendA2B f) = do
+    z <- f
     str <- send (show z)
-    return $ read str-}
+    return $ read str
 algoA (SendB2A _) = recv <&> read
 algoA (BindP pz f) = do
     z <- algoA pz
