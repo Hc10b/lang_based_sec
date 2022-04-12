@@ -25,6 +25,7 @@ source-repository head
 
 library
   exposed-modules:
+      CompilerError
       Lib
   other-modules:
       Paths_project

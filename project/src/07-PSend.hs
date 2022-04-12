@@ -34,12 +34,18 @@ class Monad m => Medium m where
 -- The monad where everything will be happening
 data Protocol ma mb z where
     Preshared :: z -> Protocol ma mb z
-    SendA2B :: (Show z, Read z) => (ma z) -> Protocol ma mb z
-    SendB2A :: (Show z, Read z) => (bmb z) -> Protocol ma mb z
-    ComputeA :: (Protocol ma mb z) -> (z -> ma y) -> Protocol ma mb z
-    ComputeB :: (Protocol ma mb z) -> (z -> mb y) -> Protocol ma mb z
-    PSend :: (Protocol ma mb z) -> (ma (Maybe x)) -> (mb (Maybe y)) -> (y -> ma (Maybe x)) -> (x -> mb (Maybe y)) -> Protocol ma mb (x, y)
-    BindP :: (Protocol ma mb z) -> (z -> Protocol ma mb x) -> Protocol ma mb x
+    BindP :: Protocol ma mb z -> (z -> Protocol ma mb x) -> Protocol ma mb x
+    -- simple message passing
+    SendA2B :: (Medium ma, Medium mb, Show z, Read z) => ma z -> Protocol ma mb z
+    SendB2A :: (Medium ma, Medium mb, Show z, Read z) => mb z -> Protocol ma mb z
+    -- inject data into monads
+    LiftA :: (y -> ma ()) -> Protocol ma mb z
+    LiftB :: (y -> mb ()) -> Protocol ma mb z
+    -- possible sychronized concurrent messages of both sides
+    PSend :: (Medium ma, Medium mb, Show x, Show y) => ma (Maybe x) -> mb (Maybe y) -> (y -> Maybe (ma x)) -> (x -> Maybe (mb y)) -> Protocol ma mb (x, y)
+    -- -- possible async concurrent messages of both side with possibility to return resync
+    -- -- e.g. for live multiplayer game
+    -- Async :: (Bool -> ma (Maybe ca)) -> (Bool -> mb (Maybe cb)) -> (ca -> mb ()) -> (cb -> ma ()) -> (ca -> Bool) -> (cb -> Bool) -> Protocol ma mb (ca, cb)
 
 instance Functor (Protocol ma mb) where
     f `fmap` mx = f <$> mx
@@ -55,7 +61,6 @@ instance Monad (Protocol ma mb) where
 
 
 -- todo
--- - interaction with enviorment
 -- - lit + checking + computation
 
   --SendA2BLit
@@ -65,15 +70,17 @@ instance Monad (Protocol ma mb) where
 
 -- An example program written in ProtoM could look like
 --example :: Program Int [Int] Int ()
-example :: Medium ma => Medium mb => Protocol ma mb (Int, ())
+example :: Medium ma => Medium mb => ClientState Int ma => ClientState [Int] mb => Protocol ma mb (Int, ())
 example = do
-  iPub <- SendA2B return
-  xPub <- SendB2A (\l -> let x = l !! iPub in return x)
+  iPub <- SendA2B $ do getC
+  xPub <- SendB2A $ do
+      ints <- getC
+      return $ ints !! iPub
   return (xPub, ())
 
 -- this is flawful because single-dots are recognized as end of message
-type ClientS = [[String]]
-smtpWithFlaw :: Medium ma => Medium mb => ClientState ClientS ma => Interactive ma => Protocol ma mb [[String]]
+type SmtpClientS = [[String]]
+smtpWithFlaw :: Medium ma => Medium mb => ClientState SmtpClientS ma => Interactive ma => Protocol ma mb [[String]]
 smtpWithFlaw = do
     greeting
     mails <- mail_exchange []
@@ -81,21 +88,18 @@ smtpWithFlaw = do
     return mails
     where
         greeting = do
-            SendA2B (const $ return "HELO")
-            SendB2A (const $ return "HELO")
+            SendA2B (return "HELO")
+            SendB2A (return "HELO")
             return ()
         mail_exchange collected_mails = do
-            continue <- SendA2B (\msgs ->
+            continue <- SendA2B $ do
+                msgs <- getC
+                let x = ["test"]:msgs -- type hint
                 if length collected_mails /= length msgs
                               then do
-                                   msg <- readI
-                                   msg' <- getC
-                                   putC ([msg]:msg')
                                    return "SEND"
                               else do
-                                  outputI "end of messages detected"
                                   return ""
-                    )
             if continue=="SEND" then do
                 next_mail <- transfer_mail (length collected_mails) []
                 mail_exchange (next_mail:collected_mails)
@@ -103,13 +107,9 @@ smtpWithFlaw = do
                 return $ reverse collected_mails
 
         transfer_mail mailN collectedLines = do
-            continue <- SendA2B (\msgs ->
-                if length collectedLines /= length (msgs !! mailN) then do
-                    let msg = ""
-                    msg' <- getC
-                    putC ([msg]:msg')
-                    putC msg'
-                    outputI $ "Found sth in state:" ++ concat (concat msg') ++ "!"
+            continue <- SendA2B (do
+                msgs <- getC
+                if length collectedLines /= length (msgs !! mailN) then 
                     return $ (msgs !! mailN) !! length collectedLines
                 else
                     return "."
@@ -146,6 +146,13 @@ simulateProgram p ad bd = simulateProtocol p where
 
 -- * Types for simulation
 type DuplexStore cs = State ([String], [String], [String], cs, IO ())
+--                              ^         ^          ^     ^    ^
+--                              |         |          |     |    L Final IO of this client. Not useful for interaction. Mostly for debug and output
+--                              |         |          |     L   ClientState
+--                              |         |          L  IO inputs
+--                              |         L  Incomming messages from the other party
+--                              L  Outgoing messages to the other party
+--
 --type DuplexStore cs = StateT cs (StateT ([String], [String]) (StateT [String] (StateT IO ())))))
 
 instance ClientState s (DuplexStore s) where
@@ -176,35 +183,42 @@ instance Medium (DuplexStore cs) where
         return $ head rxs
 
 -- And there will also be function to decompose values of ProtocolM into the actual algorithms for A and B:
-algoA :: Medium ma => Protocol ma mb z -> a -> ma z
-algoA (Preshared a) _ = return a
-algoA (SendA2B f) ad = do
+algoA :: Monad ma => Protocol ma mb z -> ma z
+algoA (Preshared a) = return a
+{-algoA (SendA2B f) ad = do
     z <- f ad
     str <- send (show z)
-    return $ read str
-algoA (SendB2A _) ad = recv <&> read
-algoA (BindP pz f) ad = do
-    z <- algoA pz ad
-    algoA (f z) ad
+    return $ read str-}
+algoA (SendB2A _) = recv <&> read
+algoA (BindP pz f) = do
+    z <- algoA pz
+    algoA (f z)
 
-algoB :: Medium mb => Protocol ma mb z -> b -> mb z
-algoB (Preshared a) _ = return a
-algoB (SendB2A f) ad = do 
-    z <- f ad
+flipProt :: Protocol ma mb z -> Protocol mb ma z
+flipProt (Preshared a) = Preshared a
+
+algoB :: Monad mb => Protocol ma mb z -> mb z
+algoB p = algoA $ flipProt p
+{-
+algoB :: Monad mb => Protocol ma mb z -> mb z
+algoB (Preshared a) = return a
+algoB (SendB2A f) = do 
+    z <- f 
     str <- send (show z)
     return (read str)
-algoB (SendA2B _) ad = recv <&> read
-algoB (BindP pz f) ad = do
-    z <- algoB pz ad
-    algoB (f z) ad
+--algoB (SendA2B _) ad = recv <&> read
+algoB (BindP pz f) = do
+    z <- algoB pz
+    algoB (f z)
+    -}
 
 -- And you can obtain the programs for our example by doing:
 --clientA d = algoA example d
 
-simulateCommunication :: DuplexStore ClientS a -> DuplexStore ClientS b -> IO (a,b)
-simulateCommunication clA clB =
-    let (resA, (a2bs, _, _, _, iosA)) = runState clA ([]::[String],b2as::[String], ["some message", "another message","and on another level"], [], return ()::IO ())
-        (resB, (b2as, _, _, _, iosB)) = runState clB ([]::[String],a2bs::[String], [], [[]],return ()::IO ())
+simulateCommunication :: Protocol (DuplexStore sa) (DuplexStore sb) z -> sa -> sb -> IO z
+simulateCommunication prot sa sb=
+    let (resA, (a2bs, _, _, _, iosA)) = runState (algoA prot) ([]::[String],b2as::[String], ["some message", "another message","and on another level"], sa, return ()::IO ())
+        (resB, (b2as, _, _, _, iosB)) = runState (algoB prot) ([]::[String],a2bs::[String], [], sb,return ()::IO ())
     in do
         putStrLn "Messages A→B:"
         print a2bs
@@ -214,15 +228,10 @@ simulateCommunication clA clB =
         iosA
         putStrLn "IO B:"
         iosB
-        return (resA, resB)
+        return resA
 
 
---simulateExample = simulateCommunication (clientA 1 example) (clientB [1,2,3] example)
-
-simulateCom prot ad bd = simulateCommunication (algoA prot ad) (algoB prot bd)
-simulateSMTP msgs = simulateCom smtpWithFlaw msgs undefined
-
-smtpExampleShowingFlaw = simulateSMTP [["hi", "", "this is just a short message"], ["the next line is only a dot",".","and this line is dropped symmetrically"]]
+smtpExampleShowingFlaw = simulateCommunication smtpWithFlaw [["hi", "", "this is just a short message"], ["the next line is only a dot",".","and this line is dropped symmetrically"]]
 
 {-instance MonadIO m => Interactive m where
     readI = liftIO readLn 
