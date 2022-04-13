@@ -7,11 +7,6 @@ import qualified Control.Monad.Identity as Monad
 import Control.Monad.Identity (Identity(runIdentity))
 
 
--- TODO: Implement support for timinig
--- get time
--- timed messages
--- delayed messages
-
 -- * Types for simulation
 data Input = Input {timeI:: Int, payloadI::String}
 data Message = Message {timeM::Int, payloadM::String}
@@ -83,16 +78,19 @@ instance Medium (DuplexStore cs) where
         else 
             return Nothing
 
-simulateCommunication :: Protocol (DuplexStore sa) (DuplexStore sb) z -> [Input] -> [Input] -> sa -> sb -> IO (z,z)
-simulateCommunication prot inpA inpB sa sb=
+delayMessages :: [Message] -> (Message -> Int) -> [Message]
+delayMessages msgs delay = map (\m-> Message (timeM m + abs (delay m)) (payloadM m)) msgs
+
+simulateCommunication :: Protocol (DuplexStore sa) (DuplexStore sb) z -> [Input] -> [Input] -> sa -> sb -> (Message -> Int) -> (Message -> Int) -> IO (z,z)
+simulateCommunication prot inpA inpB sa sb delayAB delayBA=
     let b1 = evalStateT (algoB prot) sb
-        b2 = runStateT b1 ([], a2bs)
+        b2 = runStateT b1 ([], delayMessages a2bs delayAB)
         b3 = evalStateT b2 inpB
         b4 = runStateT b3 (return ())
         b5 = evalStateT b4 0
         ((resB, (b2as, _)), iosB) = runIdentity b5
         a1 = evalStateT (algoA prot) sa
-        a2 = runStateT a1 ([], b2as)
+        a2 = runStateT a1 ([], delayMessages b2as delayBA)
         a3 = evalStateT a2 inpA
         a4 = runStateT a3 (return ())
         a5 = evalStateT a4 0
