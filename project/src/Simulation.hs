@@ -13,61 +13,90 @@ import Control.Monad.Identity (Identity(runIdentity))
 -- delayed messages
 
 -- * Types for simulation
+data Input = Input {timeI:: Int, payloadI::String}
+data Message = Message {timeM::Int, payloadM::String}
+  deriving Show
+
 --type DuplexStore cs = State ([String], [String], [String], cs, IO ())
---                              ^         ^          ^     ^    ^
---                              |         |          |     |    L Final IO of this client. Not useful for interaction. Mostly for debug and output
---                              |         |          |     L   ClientState
---                              |         |          L  IO inputs
---                              |         L  Incomming messages from the other party
---                              L  Outgoing messages to the other party
---
-type DuplexStore cs = StateT cs (StateT ([String], [String]) (StateT [String] (StateT (IO ()) Monad.Identity)))
+type DuplexStore cs = StateT cs (StateT ([Message], [Message]) (StateT [Input] (StateT (IO ()) (StateT Int Monad.Identity))))
+--                            ^              ^          ^                  ^              ^             ^
+--                            |              |          |                  |              |             L current time at the client
+--                            |              |          |                  |              L Final IO of this client. Not useful for interaction. Mostly for debug and output
+--                            |              |          |                  L  IO inputs
+--                            |              |          L Incomming messages from the other party
+--                            |              L  Outgoing messages to the other party
+--                            L   ClientState
+
+getTime :: DuplexStore cs Int
+getTime = lift $ lift $ lift $ lift get
+
+spendTime :: Int -> DuplexStore cs ()
+spendTime time = do
+    curTime <- getTime
+    lift $ lift $ lift $ lift $ put $ curTime + abs time
 
 instance ClientState s (DuplexStore s) where
-    putC cs = do
-        put cs
-        --(txs, rxs, msgs, _, io) <- get
-        --put (txs, rxs, msgs, cs, io)
-    getC = do
-        get
-        --(txs, rxs, msgs, cs, io) <- get
-        --return cs
+    putC = put
+    getC = get
 
 instance Interactive (DuplexStore cs) where
     readI = do
         msgs <- lift $ lift get
         lift $ lift $ put (tail msgs)
-        return $ head msgs
+        let Input mTime payload = head msgs
+        curTime <- getTime
+        Monad.when (mTime > curTime) $
+            spendTime (mTime - curTime)
+        return payload
     outputI msg = do
         io <- lift $ lift $ lift get
-        lift $ lift $ lift $ put (io >> putStrLn msg)
+        curTime <- getTime
+        lift $ lift $ lift $ put (io >> putStrLn (show curTime ++ ": " ++ msg))
+        return ()
+    time = do
+        spendTime 1
+        getTime
 
 instance Medium (DuplexStore cs) where
     send msg = do
         (txs, rxs) <- lift get
-        lift $ put (txs++[msg], rxs)
+        curTime <- getTime
+        lift $ put (txs++[Message curTime msg], rxs)
         outputI $ "A sends " ++ msg
         return msg
     recv = do
         (txs, rxs) <- lift get
         lift $ put (txs, tail rxs)
-        outputI $ "A receives " ++ head rxs
-        return $ head rxs
+        let Message mTime payload = head rxs
+        outputI $ "A receives " ++ payload
+        curTime <- getTime
+        Monad.when (mTime > curTime) $
+            spendTime (mTime - curTime)
+        return payload
     maybeRecv = do
-        Just <$> recv
+        curTime <- getTime
+        spendTime 1
+        (txs, rxs) <- lift get
+        let Message mTime payload = head rxs
+        if mTime >= curTime then
+            Just <$> recv
+        else 
+            return Nothing
 
-simulateCommunication :: Protocol (DuplexStore sa) (DuplexStore sb) z -> [String] -> [String] -> sa -> sb -> IO (z,z)
+simulateCommunication :: Protocol (DuplexStore sa) (DuplexStore sb) z -> [Input] -> [Input] -> sa -> sb -> IO (z,z)
 simulateCommunication prot inpA inpB sa sb=
     let b1 = evalStateT (algoB prot) sb
         b2 = runStateT b1 ([], a2bs)
         b3 = evalStateT b2 inpB
         b4 = runStateT b3 (return ())
-        ((resB, (b2as, _)), iosB) = runIdentity b4
+        b5 = evalStateT b4 0
+        ((resB, (b2as, _)), iosB) = runIdentity b5
         a1 = evalStateT (algoA prot) sa
         a2 = runStateT a1 ([], b2as)
         a3 = evalStateT a2 inpA
         a4 = runStateT a3 (return ())
-        ((resA, (a2bs, _)), iosA) = runIdentity a4
+        a5 = evalStateT a4 0
+        ((resA, (a2bs, _)), iosA) = runIdentity a5
     in do
         putStrLn "Messages A→B:"
         print a2bs
