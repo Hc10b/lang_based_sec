@@ -18,6 +18,7 @@ import Control.Monad.State
 --import qualified Control.Monad
 --import qualified Data.Functor
 import Data.Functor
+import ClientMonadClasses
 
 class Monad m => Medium m where
     send :: String -> m String
@@ -57,6 +58,33 @@ data Protocol ma mb z where
     -- --                |                           L Given whether party A want to sync, whether and what B want's to send.
     -- --                L Given whether party B want to sync, whether and what A want's to send.
 
+timeoutB :: Medium ma => Medium mb => Interactive mb => ClientState (Maybe Int) mb => Show x => Read x => Show y => Read y => ma (Maybe x) -> (x -> mb y) -> Int -> Protocol ma mb (Maybe (x,y))
+timeoutB client response timeout =  do
+    let serverResponse x = Just $ do
+        putC (Nothing::Maybe Int)
+        y <- response x
+        return $ Just y
+    let serverCheck = do
+        curTime <- time
+        mTime <- getC
+        case mTime of
+            Nothing -> do
+                putC $ Just curTime
+                return Nothing
+            Just startTime ->
+                if curTime - startTime > timeout then
+                    return $ Just Nothing
+                else
+                    return Nothing
+
+    (mx, mmy) <- CSend client serverCheck (const Nothing) serverResponse
+    case mmy of
+        Nothing -> undefined -- can't happen
+        Just my  -> case my of
+            Nothing -> return Nothing -- Timeout occured
+            Just y -> case mx of
+                Nothing ->  undefined -- can't occur
+                Just x ->  return $ Just (x,y) -- Server responded
 
 instance Functor (Protocol ma mb) where
     f `fmap` mx = f <$> mx
