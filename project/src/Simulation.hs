@@ -51,6 +51,7 @@ instance Interactive (DuplexStore cs) where
     time = do
         spendTime 1
         getTime
+    sleep time = spendTime $ abs time
 
 instance Medium (DuplexStore cs) where
     send msg = do
