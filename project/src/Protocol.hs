@@ -19,6 +19,7 @@ import Control.Monad.State
 --import qualified Data.Functor
 import Data.Functor
 import ClientMonadClasses
+import qualified Control.Monad
 
 class Monad m => Medium m where
     send :: String -> m String
@@ -47,35 +48,35 @@ data Protocol ma mb z where
     --                                                                     |               L For asking whether (Maybe) and what (y) to send for partB.
     --                                                                     L For asking whether (Maybe) and what (y) to send for partA.
     --
-    -- -- possible async concurrent messages of both side with possibility to resync
-    -- -- e.g. for live multiplayer game
-    -- Async :: (Bool -> ma (Maybe ca)) -> (Bool -> mb (Maybe cb)) -> (ca -> mb ()) -> (cb -> ma ()) -> (ca -> Bool) -> (cb -> Bool) -> Protocol ma mb (ca, cb)
-    -- --                ^                           ^                      ^                ^                 ^                ^
-    -- --                |                           |                      |                |                 |                L Whether B's message is a sync request
-    -- --                |                           |                      |                |                 L Whether A's message is a sync request
-    -- --                |                           |                      |                L Processing a message from B on A's side
-    -- --                |                           |                      L Processing a message from A on B's side
-    -- --                |                           L Given whether party A want to sync, whether and what B want's to send.
-    -- --                L Given whether party B want to sync, whether and what A want's to send.
+    -- possible async concurrent messages of both side with possibility to resync
+    -- e.g. for live multiplayer game
+    Async :: (Medium ma, Medium mb, Show ca, Read ca, Show cb, Read cb) => ma (Maybe ca) -> mb (Maybe cb) -> (ca -> mb ()) -> (cb -> ma ()) -> (ca -> Bool) -> (cb -> Bool) -> Protocol ma mb (ca, cb)
+    --                                                                     ^                 ^                      ^                ^                 ^                ^
+    --                                                                     |                 |                      |                |                 |                L Whether B's message is a sync request
+    --                                                                     |                 |                      |                |                 L Whether A's message is a sync request
+    --                                                                     |                 |                      |                L Processing a message from B on A's side
+    --                                                                     |                 |                      L Processing a message from A on B's side
+    --                                                                     |                 L Given whether party A want to sync, whether and what B want's to send.
+    --                                                                     L Given whether party B want to sync, whether and what A want's to send.
 
 timeoutB :: Medium ma => Medium mb => Interactive mb => ClientState (Maybe Int) mb => Show x => Read x => Show y => Read y => ma (Maybe x) -> (x -> mb y) -> Int -> Protocol ma mb (Maybe (x,y))
 timeoutB client response timeout =  do
     let serverResponse x = Just $ do
-        putC (Nothing::Maybe Int)
-        y <- response x
-        return $ Just y
+            putC (Nothing::Maybe Int)
+            y <- response x
+            return $ Just y
     let serverCheck = do
-        curTime <- time
-        mTime <- getC
-        case mTime of
-            Nothing -> do
-                putC $ Just curTime
-                return Nothing
-            Just startTime ->
-                if curTime - startTime > timeout then
-                    return $ Just Nothing
-                else
+            curTime <- time
+            mTime <- getC
+            case mTime of
+                Nothing -> do
+                    putC $ Just curTime
                     return Nothing
+                Just startTime ->
+                    if curTime - startTime > timeout then
+                        return $ Just Nothing
+                    else
+                        return Nothing
 
     (mx, mmy) <- CSend client serverCheck (const Nothing) serverResponse
     case mmy of
@@ -109,7 +110,7 @@ algoA :: Monad ma => Protocol ma mb z -> ma z
 algoA (Preshared a) = return a
 algoA (SendA2B f) = do
     z <- f
-    str <- send (show z)
+    str <- send $ show z
     return $ read str
 algoA (SendB2A _) = recv <&> read
 algoA (BindP pz f) = do
@@ -138,6 +139,55 @@ algoA (CSend la lb ra rb) = do
                 x <- mx
                 strA <- send (show x)
                 return (Just $ read strA, Just $ read strB)
+algoA (Async txa txb rxa rxb sa sb) = loopT
+    where
+        loopR = do
+                mb <- maybeRecv
+                case mb of
+                    Nothing -> loopT
+                    Just strb ->
+                        do
+                            let cb = read strb
+                            rxb cb
+                            if sb cb then
+                                wait_for_this cb
+                            else
+                                loopT
+        loopT = do
+            ma <- txa
+            case ma of
+              Nothing -> loopR
+              Just ca ->
+                  do
+                      str <- send $ show ca
+                      if sa $ read str then
+                          wait_for_other (read str)
+                      else
+                          loopR
+        wait_for_other this_sync = do
+            mb <- maybeRecv
+            case mb of
+              Nothing -> wait_for_other this_sync
+              Just strb ->
+                  do
+                      let cb = read strb
+                      rxb cb
+                      if sb cb then
+                          return (this_sync, cb)
+                      else wait_for_other this_sync
+        wait_for_this other_sync = do
+            ma <- txa
+            case ma of
+              Just ca ->
+                  do
+                      str <- send $ show ca
+                      if sa $ read str then
+                          return (read str, other_sync)
+                      else
+                          wait_for_this other_sync
+              Nothing -> wait_for_this other_sync
+
+
 
 
 
@@ -150,6 +200,9 @@ flipProt (LiftB m) = LiftA m
 flipProt p@(CSend sa sb ra rb) = do
     res <- CSend sb sa rb ra
     return (snd res, fst res)
+flipProt (Async txa txb rxa rxb sa sb) = do
+    (ca,cb) <- Async txb txa rxb rxa sb sa
+    return (cb, ca)
 flipProt (BindP ma f) = do
     a <- flipProt ma
     flipProt $ f a
