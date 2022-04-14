@@ -1,4 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
+
+module Protocols.Example where
 import Protocol
 import ClientMonadClasses
 

@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+module Protocols.Smtp where
 import Protocol
 import ClientMonadClasses
 
