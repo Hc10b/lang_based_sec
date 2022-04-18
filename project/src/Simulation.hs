@@ -1,5 +1,8 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+
+module Simulation where
+
 import Control.Monad.State
 import Protocol
 import ClientMonadClasses
@@ -56,35 +59,46 @@ instance Interactive (DuplexStore cs) where
 instance Medium (DuplexStore cs) where
     send msg = do
         (txs, rxs) <- lift get
+        spendTime 1
         curTime <- getTime
         lift $ put (txs++[Message curTime msg], rxs)
-        outputI $ "A sends " ++ msg
+        outputI $ "sends " ++ msg
         return msg
     recv = do
         (txs, rxs) <- lift get
         lift $ put (txs, tail rxs)
         let Message mTime payload = head rxs
-        outputI $ "A receives " ++ payload
         curTime <- getTime
-        Monad.when (mTime > curTime) $
-            spendTime (mTime - curTime)
+        let tts = max 0 (mTime-curTime)
+        spendTime tts
+        outputI $ "receives " ++ payload
+        {- -- Why isn't this working?
+        _ <- do if (mTime > curTime) then
+                   return ()
+                else
+                   return ()
+        
+        --Monad.when (mTime > curTime) $
+           --spendTime (mTime - curTime)
+        -}
         return payload
     maybeRecv = do
         curTime <- getTime
         spendTime 1
         (txs, rxs) <- lift get
-        let Message mTime payload = head rxs
-        if mTime >= curTime then
+        let Message mTime payload = head rxs -- <- hier liegt das Problem
+        if mTime <= curTime then
             Just <$> recv
         else 
             return Nothing
 
 delayMessages :: [Message] -> (Message -> Int) -> [Message]
-delayMessages msgs delay = map (\m-> Message (timeM m + abs (delay m)) (payloadM m)) msgs
+delayMessages msgs delay = map (\m-> m{timeM=timeM m + abs (delay m)}) msgs
 
 simulateCommunication :: Protocol (DuplexStore sa) (DuplexStore sb) z -> [Input] -> [Input] -> sa -> sb -> (Message -> Int) -> (Message -> Int) -> IO (z,z)
 simulateCommunication prot inpA inpB sa sb delayAB delayBA=
     let b1 = evalStateT (algoB prot) sb
+        --b2 = runStateT b1 ([], delayMessages a2bs delayAB)
         b2 = runStateT b1 ([], delayMessages a2bs delayAB)
         b3 = evalStateT b2 inpB
         b4 = runStateT b3 (return ())
@@ -92,6 +106,7 @@ simulateCommunication prot inpA inpB sa sb delayAB delayBA=
         ((resB, (b2as, _)), iosB) = runIdentity b5
         a1 = evalStateT (algoA prot) sa
         a2 = runStateT a1 ([], delayMessages b2as delayBA)
+        --a2 = trace "a2" $ runStateT a1 ([], b2as)
         a3 = evalStateT a2 inpA
         a4 = runStateT a3 (return ())
         a5 = evalStateT a4 0
