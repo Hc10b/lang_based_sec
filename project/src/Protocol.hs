@@ -128,7 +128,7 @@ algoA (CSend la lb ra rb) = do
                 Just x -> do
                     strA <- send (show x)
                     -- check, whether B will answer
-                    case ra $ read strA of
+                    case rb $ read strA of
                         Nothing -> return (Just $ read strA, Nothing)
                         Just _ -> do
                             strB <- recv
