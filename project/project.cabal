@@ -25,28 +25,57 @@ source-repository head
 
 library
   exposed-modules:
+      ClientMonadClasses
       CompilerError
+      Config
       Lib
+      Protocol
+      Protocols.Example
+      Protocols.Http
+      Protocols.Smtp
+      RealConnector
   other-modules:
       Paths_project
   hs-source-dirs:
       src
   build-depends:
       base >=4.7 && <5
+    , bytestring
     , mtl
+    , nanomsg-haskell >=0.1.1
+    , time
   default-language: Haskell2010
 
-executable project-exe
+executable client-exe
   main-is: Main.hs
   other-modules:
       Paths_project
   hs-source-dirs:
-      app
+      client
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
+    , bytestring
     , mtl
+    , nanomsg-haskell >=0.1.1
     , project
+    , time
+  default-language: Haskell2010
+
+executable server-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_project
+  hs-source-dirs:
+      server
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , bytestring
+    , mtl
+    , nanomsg-haskell >=0.1.1
+    , project
+    , time
   default-language: Haskell2010
 
 test-suite project-test
@@ -59,6 +88,9 @@ test-suite project-test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
+    , bytestring
     , mtl
+    , nanomsg-haskell >=0.1.1
     , project
+    , time
   default-language: Haskell2010
