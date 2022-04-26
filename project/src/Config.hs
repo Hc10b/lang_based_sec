@@ -4,7 +4,7 @@ import RealConnector
 import Nanomsg
 import Protocols.Http
 
-testMiddelware = HttpMiddleware id
+
 curProt = http testMiddelware::Protocol (RealConnector Pair ()) (RealConnector Pair (Maybe Int)) ()
 
 serverState = Nothing
