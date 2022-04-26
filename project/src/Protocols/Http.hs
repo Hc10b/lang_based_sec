@@ -4,6 +4,7 @@ module Protocols.Http where
 import Protocol
 --import Control.Monad
 import ClientMonadClasses
+import BlockingTimeout
 
 newtype HttpMiddleware = HttpMiddleware {respond :: String -> String}
 
@@ -12,4 +13,7 @@ http mw = do
     mr <- timeoutB (do Just <$> readI) (return . respond mw) 60
     case mr of
       Nothing -> return ()
-      Just x0 -> http mw
+      Just x0 ->  do
+        LiftAC $ do
+          outputI $ "Exchanged" ++ show x0
+        http mw
