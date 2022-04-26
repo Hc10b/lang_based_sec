@@ -24,6 +24,7 @@ import qualified Control.Monad
 class Monad m => Medium m where
     send :: String -> m String
     recv :: m String
+    generateRecv :: m (IO String)
     maybeRecv :: m (Maybe String)
 
 -- * Protocol definition

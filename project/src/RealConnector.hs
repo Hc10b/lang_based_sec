@@ -19,7 +19,7 @@ s = socket Pair
 
 endPServer = do
     sock <- s
-    putStrLn "prä bind"
+    putStrLn "pre bind"
     bind sock "tcp://*:5560"
     putStrLn "post bind"
     return sock
@@ -40,6 +40,11 @@ instance Medium (RealConnector Pair cs) where
         sock <- lift get
         bs <- lift $ lift $ Nanomsg.recv sock
         return $ unpack bs
+    generateRecv = do
+        sock <- lift get -- :: Nanomsg.Socket Nanomsg.Pair
+        return (do
+                bs <- Nanomsg.recv (sock::Nanomsg.Socket Nanomsg.Pair)
+                return $ unpack bs)
     maybeRecv = do
         sock <- lift get
         mbs <- lift $ lift $ recv' sock

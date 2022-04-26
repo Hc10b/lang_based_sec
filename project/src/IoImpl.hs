@@ -13,6 +13,7 @@ import Data.ByteString.Char8 (unpack)
 import RealConnector
 import qualified Nanomsg
 import Nanomsg (Pair)
+import Control.Concurrent (tryTakeMVar)
 
 data GotMessageException = GotMessage
     deriving Show
@@ -20,7 +21,7 @@ data GotMessageException = GotMessage
 instance Exception GotMessageException where
 
 -- And there will also be function to decompose values of ProtocolM into the actual algorithms for A and B:
-algoA :: Protocol (RealConnector Pair cs) mb z -> RealConnector Pair cs z
+algoA :: MonadIO ma => MonadCatch ma => Medium ma => Protocol ma mb z -> ma z
 algoA (Preshared a) = return a
 algoA (SendA2B f) = do
     z <- f
@@ -36,10 +37,7 @@ algoA (CSend la lb ra rb) = do
     sendWaitThreadId <- liftIO myThreadId
     syncVar <- liftIO $ newMVar ()
     incomingMessage <- liftIO newEmptyMVar
-    sock <- lift get -- :: Nanomsg.Socket Nanomsg.Pair
-    let recv = (do
-            bs <- Nanomsg.recv (sock::Nanomsg.Socket Nanomsg.Pair)
-            return $ unpack bs)
+    recv <- generateRecv
     remoteMessageWaitThread <- liftIO $ forkIO $ waitForIncomingMessage sendWaitThreadId syncVar incomingMessage recv
 
     catch (do
@@ -81,82 +79,38 @@ algoA (CSend la lb ra rb) = do
         maybeX <- la
         maybe waitForOutgoingMessage return maybeX
 
-    {-}
-    --TODO Multithreading
-    maybeStrB <- maybeRecv
-    case maybeStrB of
-        Nothing -> do
-            maybeX <- la
-            case maybeX of
-                Nothing -> algoA (CSend la lb ra rb)
-                Just x -> do
-                    strA <- send (show x)
-                    -- check, whether B will answer
-                    case rb $ read strA of
-                        Nothing -> return (Just $ read strA, Nothing)
-                        Just _ -> do
-                            strB <- recv
-                            return (Just $ read strA, Just $ read strB)
-        Just strB -> case ra (read strB) of
-            Nothing -> return (Nothing, Just $ read strB)
-            Just mx -> do
-                x <- mx
-                strA <- send (show x)
-                return (Just $ read strA, Just $ read strB)
-                -}
-algoA (Async txa txb rxa rxb sa sb) = undefined
-    {-loopT
--- TODO multi-threading
+algoA (Async txa txb rxa rxb sa sb) = do
+    recvMa <- liftIO newEmptyMVar
+    syncB <- liftIO newEmptyMVar
+    recv <- generateRecv
+    liftIO $ forkIO $ receiveHandler recvMa syncB recv
+    sendHandler recvMa syncB
+    --receiveInThread
     where
-        loopR = do
-                mb <- maybeRecv
-                case mb of
-                    Nothing -> loopT
-                    Just strb ->
-                        do
-                            let cb = read strb
-                            rxb cb
-                            if sb cb then
-                                wait_for_this cb
-                            else
-                                loopT
-        loopT = do
+        receiveHandler recvMa syncBVar recv= do
+            strB <- recv
+            let b = read strB
+            ma <- takeMVar recvMa
+            putMVar recvMa $ ma >> rxb b
+            if sb b then
+                putMVar syncBVar b
+            else
+                receiveHandler recvMa syncBVar recv
+        sendHandler recvMa syncBVar= do
             ma <- txa
+            join $ liftIO $ takeMVar recvMa
+            liftIO $ putMVar recvMa $ return ()
             case ma of
-              Nothing -> loopR
-              Just ca ->
-                  do
-                      str <- send $ show ca
-                      if sa $ read str then
-                          wait_for_other (read str)
-                      else
-                          loopR
-        wait_for_other this_sync = do
-            mb <- maybeRecv
-            case mb of
-              Nothing -> wait_for_other this_sync
-              Just strb ->
-                  do
-                      let cb = read strb
-                      rxb cb
-                      if sb cb then
-                          return (this_sync, cb)
-                      else wait_for_other this_sync
-        wait_for_this other_sync = do
-            ma <- txa
-            case ma of
-              Just ca ->
-                  do
-                      str <- send $ show ca
-                      if sa $ read str then
-                          return (read str, other_sync)
-                      else
-                          wait_for_this other_sync
-              Nothing -> wait_for_this other_sync
-              -}
-
-
-
+                Nothing -> sendHandler recvMa syncBVar
+                Just a -> do
+                    let strA = show a
+                    send strA
+                    let readA = read strA
+                    if sa readA then do
+                        syncB <- liftIO $ takeMVar syncBVar
+                        return (readA, syncB)
+                    else
+                        sendHandler recvMa syncBVar
 
 
 algoB :: Protocol ma (RealConnector Pair cs) z -> (RealConnector Pair cs) z
