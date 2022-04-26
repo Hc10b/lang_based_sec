@@ -5,6 +5,7 @@ import Protocols.Smtp
 import Protocols.Http
 import Protocol
 import RealConnector
+import IoImpl
 import Nanomsg
 import Control.Monad.State
 import Config

@@ -37,9 +37,9 @@ data Protocol ma mb z where
     SendA2B :: (Medium ma, Medium mb, Show z, Read z) => ma z -> Protocol ma mb z
     SendB2A :: (Medium ma, Medium mb, Show z, Read z) => mb z -> Protocol ma mb z
     -- inject data into monads
-    LiftA :: ma () -> Protocol ma mb ()
+    LiftAC :: ma () -> Protocol ma mb ()
     --        L push public data into client monad
-    LiftB :: mb () -> Protocol ma mb ()
+    LiftBC :: mb () -> Protocol ma mb ()
     -- possible sychronized concurrent messages of both sides
     CSend :: (Medium ma, Medium mb, Show x, Read x, Show y, Read y) => ma (Maybe x) -> mb (Maybe y) -> (y -> Maybe (ma x)) -> (x -> Maybe (mb y)) -> Protocol ma mb (Maybe x, Maybe y)
     --                                                                     ^               ^                      ^                        ^
@@ -100,104 +100,13 @@ instance Monad (Protocol ma mb) where
     m >>= f = BindP m f
 
 
--- todo
--- - lit + checking + computation
-
-  --SendA2BLit
-
--- And there will also be function to decompose values of ProtocolM into the actual algorithms for A and B:
-algoA :: Monad ma => Protocol ma mb z -> ma z
-algoA (Preshared a) = return a
-algoA (SendA2B f) = do
-    z <- f
-    str <- send $ show z
-    return $ read str
-algoA (SendB2A _) = recv <&> read
-algoA (BindP pz f) = do
-    z <- algoA pz
-    algoA (f z)
-algoA (LiftA ma) = do ma
-algoA (LiftB mb) = return ()
-algoA (CSend la lb ra rb) = do
-    maybeStrB <- maybeRecv
-    case maybeStrB of
-        Nothing -> do
-            maybeX <- la
-            case maybeX of
-                Nothing -> algoA (CSend la lb ra rb)
-                Just x -> do
-                    strA <- send (show x)
-                    -- check, whether B will answer
-                    case rb $ read strA of
-                        Nothing -> return (Just $ read strA, Nothing)
-                        Just _ -> do
-                            strB <- recv
-                            return (Just $ read strA, Just $ read strB)
-        Just strB -> case ra (read strB) of
-            Nothing -> return (Nothing, Just $ read strB)
-            Just mx -> do
-                x <- mx
-                strA <- send (show x)
-                return (Just $ read strA, Just $ read strB)
-algoA (Async txa txb rxa rxb sa sb) = loopT
-    where
-        loopR = do
-                mb <- maybeRecv
-                case mb of
-                    Nothing -> loopT
-                    Just strb ->
-                        do
-                            let cb = read strb
-                            rxb cb
-                            if sb cb then
-                                wait_for_this cb
-                            else
-                                loopT
-        loopT = do
-            ma <- txa
-            case ma of
-              Nothing -> loopR
-              Just ca ->
-                  do
-                      str <- send $ show ca
-                      if sa $ read str then
-                          wait_for_other (read str)
-                      else
-                          loopR
-        wait_for_other this_sync = do
-            mb <- maybeRecv
-            case mb of
-              Nothing -> wait_for_other this_sync
-              Just strb ->
-                  do
-                      let cb = read strb
-                      rxb cb
-                      if sb cb then
-                          return (this_sync, cb)
-                      else wait_for_other this_sync
-        wait_for_this other_sync = do
-            ma <- txa
-            case ma of
-              Just ca ->
-                  do
-                      str <- send $ show ca
-                      if sa $ read str then
-                          return (read str, other_sync)
-                      else
-                          wait_for_this other_sync
-              Nothing -> wait_for_this other_sync
-
-
-
-
-
 flipProt :: Protocol ma mb z -> Protocol mb ma z
 flipProt (Preshared a) = Preshared a
 flipProt (SendA2B f) = SendB2A f
 flipProt (SendB2A f) = SendA2B f
-flipProt (LiftA m) = LiftB m
-flipProt (LiftB m) = LiftA m
-flipProt p@(CSend sa sb ra rb) = do
+flipProt (LiftAC m) = LiftBC m
+flipProt (LiftBC m) = LiftAC m
+flipProt (CSend sa sb ra rb) = do
     res <- CSend sb sa rb ra
     return (snd res, fst res)
 flipProt (Async txa txb rxa rxb sa sb) = do
@@ -206,6 +115,3 @@ flipProt (Async txa txb rxa rxb sa sb) = do
 flipProt (BindP ma f) = do
     a <- flipProt ma
     flipProt $ f a
-
-algoB :: Monad mb => Protocol ma mb z -> mb z
-algoB p = algoA $ flipProt p
