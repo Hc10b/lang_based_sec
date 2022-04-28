@@ -80,7 +80,7 @@ algoA (CSend la lb ra rb) = do
         maybe waitForOutgoingMessage return maybeX
 
 algoA (Async txa txb rxa rxb sa sb) = do
-    recvMa <- liftIO newEmptyMVar
+    recvMa <- liftIO $ newMVar $ return ()
     syncB <- liftIO newEmptyMVar
     recv <- generateRecv
     liftIO $ forkIO $ receiveHandler recvMa syncB recv
