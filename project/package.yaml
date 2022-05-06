@@ -22,14 +22,39 @@ description:         Please see the README on GitHub at <https://github.com/gith
 dependencies:
 - base >= 4.7 && < 5
 - mtl
+- nanomsg-haskell >= 0.1.1
+- time
+- bytestring
+- exceptions
+- transformers
 
 library:
   source-dirs: src
 
 executables:
-  project-exe:
+  #project-exe:
+    #main:                Main.hs
+    #source-dirs:         app
+    #ghc-options:
+    #- -threaded
+    #- -rtsopts
+    #- -with-rtsopts=-N
+    #dependencies:
+    #- project
+
+  server-exe:
     main:                Main.hs
-    source-dirs:         app
+    source-dirs:         server
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - project
+
+  client-exe:
+    main:                Main.hs
+    source-dirs:         client
     ghc-options:
     - -threaded
     - -rtsopts

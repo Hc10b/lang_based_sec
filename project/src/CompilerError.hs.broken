@@ -1,3 +1,4 @@
+module CompilerError where
 -- This file crashes the ghc type checker
 {-
 {-# LANGUAGE GADTs #-}
