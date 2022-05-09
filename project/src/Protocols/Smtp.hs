@@ -5,12 +5,13 @@ import ClientMonadClasses
 
 -- this is flawful because single-dots are recognized as end of message
 type SmtpClientS = [[String]]
-smtpWithFlaw :: Medium ma => Medium mb => ClientState SmtpClientS ma => Interactive ma => Protocol ma mb [[String]]
+smtpWithFlaw :: Medium ma => Medium mb => ClientState SmtpClientS ma => Interactive ma => Protocol ma mb ()
 smtpWithFlaw = do
     greeting
     mails <- mail_exchange []
     quit
-    return mails
+    LiftAC $ outputI $ show mails
+    return ()
     where
         greeting = do
             SendA2B (return "HELO")
