@@ -5,7 +5,7 @@ import ClientMonadClasses
 
 -- this is flawful because single-dots are recognized as end of message
 type SmtpClientS = [[String]]
-smtpWithFlaw :: Medium ma => Medium mb => ClientState SmtpClientS ma => Interactive ma => Protocol ma mb ()
+smtpWithFlaw :: Monad ma => Monad mb => ClientState SmtpClientS ma => Interactive ma => Protocol ma mb ()
 smtpWithFlaw = do
     greeting
     mails <- mail_exchange []
@@ -20,7 +20,7 @@ smtpWithFlaw = do
         mail_exchange collected_mails = do
             continue <- SendA2B $ do
                 msgs <- getC
-                let x = ["test"]:msgs -- type hint
+                let _ = ["test"]:msgs -- type hint
                 if length collected_mails /= length msgs
                               then do
                                    return "SEND"

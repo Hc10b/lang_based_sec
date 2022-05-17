@@ -1,5 +1,5 @@
 module Protocols.AsyncMessages where
-import Protocol (Protocol(Async), Medium)
+import Protocol (Protocol(Async))
 import ClientMonadClasses
 import System.Timeout
 import Control.Monad.IO.Class
@@ -22,7 +22,7 @@ handleReceive str = do
 isSync "Sync!" = True
 isSync _ = False
 
-chat :: (Medium ma, Medium mb, Interactive ma, Interactive  mb, MonadIO ma, MonadIO mb) => Protocol ma mb ()
+chat :: (Interactive ma, Interactive  mb, MonadIO ma, MonadIO mb) => Protocol ma mb ()
 chat = do
     Async handleInput handleInput handleReceive handleReceive isSync isSync
     return ()

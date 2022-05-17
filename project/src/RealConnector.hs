@@ -1,4 +1,3 @@
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 module RealConnector where
@@ -6,14 +5,11 @@ module RealConnector where
 import Nanomsg
 import Control.Monad.State
 import ClientMonadClasses
---import System.System
 import Control.Concurrent
 import Data.Time.Clock.POSIX
-import Protocol
---import qualified Data.ByteString.Lazy as BLU
 import Data.String
---import Data.ByteString (unpack)
 import Data.ByteString.Char8 (unpack)
+import Medium
 
 s = socket Pair
 
@@ -31,23 +27,19 @@ endPClient = do
 
 type RealConnector a cs = StateT cs (StateT (Socket a) IO)
 
-instance Medium (RealConnector Pair cs) where
-    send msg = do
-        sock <- lift get
-        lift $ lift $ Nanomsg.send sock $ fromString msg
+instance MonadIO m => Medium m (Socket Pair) where
+    send sock msg = do
+        liftIO $ Nanomsg.send sock $ fromString msg
         return msg
-    recv = do
-        sock <- lift get
-        bs <- lift $ lift $ Nanomsg.recv sock
+    recv sock = do
+        bs <- liftIO $ Nanomsg.recv sock
         return $ unpack bs
-    generateRecv = do
-        sock <- lift get -- :: Nanomsg.Socket Nanomsg.Pair
+    generateRecv sock = do
         return (do
                 bs <- Nanomsg.recv (sock::Nanomsg.Socket Nanomsg.Pair)
                 return $ unpack bs)
-    maybeRecv = do
-        sock <- lift get
-        mbs <- lift $ lift $ recv' sock
+    maybeRecv sock = do
+        mbs <- liftIO $ recv' sock
         return $ unpack <$> mbs
 
 instance ClientState cs (RealConnector a cs) where
@@ -55,7 +47,7 @@ instance ClientState cs (RealConnector a cs) where
     getC = get
 
 instance Interactive (RealConnector a cs) where
-    outputI = lift . lift . putStrLn
-    readI = lift $ lift getLine
-    sleep = lift . lift . threadDelay . (1000000*) --sleep for a million microseconds, or one second
-    time = lift $ lift $ round `fmap` getPOSIXTime
+    outputI = liftIO . putStrLn
+    readI = liftIO getLine
+    sleep = liftIO . threadDelay . (1000000*) --sleep for a million microseconds, or one second
+    time = liftIO $ round `fmap` getPOSIXTime

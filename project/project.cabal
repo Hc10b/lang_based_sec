@@ -29,8 +29,6 @@ library
       ClientMonadClasses
       Config
       IoImpl
-      Lib
-      MediumImpl
       Protocol
       Protocols.AsyncMessages
       Protocols.Example

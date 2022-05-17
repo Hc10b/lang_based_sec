@@ -3,7 +3,7 @@ module BlockingTimeout where
 import Protocol
 import ClientMonadClasses
 
-timeoutB :: Medium ma => Medium mb => Interactive mb => Show x => Read x => Show y => Read y => ma (Maybe x) -> (x -> mb y) -> Int -> Protocol ma mb (Maybe (x,y))
+timeoutB :: Monad ma => Monad mb => Interactive mb => Show x => Read x => Show y => Read y => ma (Maybe x) -> (x -> mb y) -> Int -> Protocol ma mb (Maybe (x,y))
 timeoutB client response timeout =  do
     let serverResponse x = Just $ do
             y <- response x

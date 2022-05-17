@@ -1,2 +1,10 @@
 .stack-work/
 *~
+*.dyn_hi
+*.hi
+*.dyn_o
+*.o
+*.h
+*.cache
+dist-newstyle/*
+*.old

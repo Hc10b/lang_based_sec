@@ -1,13 +1,15 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module Simulation where
+module Simulation.Simulation where
 
 import Control.Monad.State
 import Protocol
 import ClientMonadClasses
 import qualified Control.Monad.Identity as Monad
 import Control.Monad.Identity (Identity(runIdentity))
+import Simulation.SequentialImpl (algoA, algoB)
+import Medium
 
 
 -- * Types for simulation
@@ -56,15 +58,15 @@ instance Interactive (DuplexStore cs) where
         getTime
     sleep time = spendTime $ abs time
 
-instance Medium (DuplexStore cs) where
-    send msg = do
+instance Medium (DuplexStore cs) () where
+    send _ msg = do
         (txs, rxs) <- lift get
         spendTime 1
         curTime <- getTime
         lift $ put (txs++[Message curTime msg], rxs)
         outputI $ "sends " ++ msg
         return msg
-    recv = do
+    recv _ = do
         (txs, rxs) <- lift get
         lift $ put (txs, tail rxs)
         let Message mTime payload = head rxs
@@ -82,13 +84,13 @@ instance Medium (DuplexStore cs) where
            --spendTime (mTime - curTime)
         -}
         return payload
-    maybeRecv = do
+    maybeRecv _ = do
         curTime <- getTime
         spendTime 1
         (txs, rxs) <- lift get
         let Message mTime payload = head rxs -- <- hier liegt das Problem
         if mTime <= curTime then
-            Just <$> recv
+            Just <$> recv ()
         else 
             return Nothing
 
@@ -97,14 +99,14 @@ delayMessages msgs delay = map (\m-> m{timeM=timeM m + abs (delay m)}) msgs
 
 simulateCommunication :: Protocol (DuplexStore sa) (DuplexStore sb) z -> [Input] -> [Input] -> sa -> sb -> (Message -> Int) -> (Message -> Int) -> IO (z,z)
 simulateCommunication prot inpA inpB sa sb delayAB delayBA=
-    let b1 = evalStateT (algoB prot) sb
+    let b1 = evalStateT (algoB () prot) sb
         --b2 = runStateT b1 ([], delayMessages a2bs delayAB)
         b2 = runStateT b1 ([], delayMessages a2bs delayAB)
         b3 = evalStateT b2 inpB
         b4 = runStateT b3 (return ())
         b5 = evalStateT b4 0
         ((resB, (b2as, _)), iosB) = runIdentity b5
-        a1 = evalStateT (algoA prot) sa
+        a1 = evalStateT (algoA () prot) sa
         a2 = runStateT a1 ([], delayMessages b2as delayBA)
         --a2 = trace "a2" $ runStateT a1 ([], b2as)
         a3 = evalStateT a2 inpA

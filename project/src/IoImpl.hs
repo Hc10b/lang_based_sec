@@ -1,50 +1,46 @@
 {-# LANGUAGE GADTs #-}
 module IoImpl where
 
-import ClientMonadClasses
 import Protocol
 import Data.Functor
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Concurrent
 import Control.Monad.Catch
-import Control.Monad.Trans.Class
 import Control.Monad.State
 import Data.ByteString.Char8 (unpack)
-import RealConnector
 import qualified Nanomsg
 import Nanomsg (Pair)
-import Control.Concurrent (tryTakeMVar)
+import Medium
 
 data GotMessageException = GotMessage
     deriving Show
 
 instance Exception GotMessageException where
 
--- And there will also be function to decompose values of ProtocolM into the actual algorithms for A and B:
-algoA :: MonadIO ma => MonadCatch ma => Medium ma => Protocol ma mb z -> ma z
-algoA (Preshared a) = return a
-algoA (SendA2B f) = do
+algoA :: MonadIO ma => MonadCatch ma => Medium ma m => m -> Protocol ma mb z -> ma z
+algoA m (Preshared a) = return a
+algoA m (SendA2B f) = do
     z <- f
-    str <- send $ show z
+    str <- send m $ show z
     return $ read str
-algoA (SendB2A _) = recv <&> read
-algoA (BindP pz f) = do
-    z <- algoA pz
-    algoA (f z)
-algoA (LiftAC ma) = do ma
-algoA (LiftBC mb) = return ()
-algoA (CSend la lb ra rb) = do
+algoA m (SendB2A _) = recv m <&> read
+algoA m (BindP pz f) = do
+    z <- algoA m pz
+    algoA m (f z)
+algoA m (LiftAC ma) = do ma
+algoA m (LiftBC mb) = return ()
+algoA m (CSend la lb ra rb) = do
     sendWaitThreadId <- liftIO myThreadId
     syncVar <- liftIO $ newMVar ()
     incomingMessage <- liftIO newEmptyMVar
-    recv <- generateRecv
+    recv <- generateRecv m
     remoteMessageWaitThread <- liftIO $ forkIO $ waitForIncomingMessage sendWaitThreadId syncVar incomingMessage recv
 
     catch (do
         x <- waitForOutgoingMessage
         liftIO $ takeMVar syncVar
         let strA = show x
-        send strA
+        send m strA
         let readA = read strA
         case rb readA of
           Nothing -> do
@@ -63,7 +59,7 @@ algoA (CSend la lb ra rb) = do
                                 x <- max
                                 let strX = show x
                                 let readX = read strX
-                                send strX
+                                send m strX
                                 return (Just readX, Just y))
 
 
@@ -79,10 +75,10 @@ algoA (CSend la lb ra rb) = do
         maybeX <- la
         maybe waitForOutgoingMessage return maybeX
 
-algoA (Async txa txb rxa rxb sa sb) = do
+algoA m (Async txa txb rxa rxb sa sb) = do
     recvMa <- liftIO $ newMVar $ return ()
     syncB <- liftIO newEmptyMVar
-    recv <- generateRecv
+    recv <- generateRecv m
     liftIO $ forkIO $ receiveHandler recvMa syncB recv
     sendHandler recvMa syncB
     --receiveInThread
@@ -104,7 +100,7 @@ algoA (Async txa txb rxa rxb sa sb) = do
                 Nothing -> sendHandler recvMa syncBVar
                 Just a -> do
                     let strA = show a
-                    send strA
+                    send m strA
                     let readA = read strA
                     if sa readA then do
                         syncB <- liftIO $ takeMVar syncBVar
@@ -113,5 +109,5 @@ algoA (Async txa txb rxa rxb sa sb) = do
                         sendHandler recvMa syncBVar
 
 
-algoB :: Protocol ma (RealConnector Pair cs) z -> (RealConnector Pair cs) z
-algoB p = algoA $ flipProt p
+algoB :: (MonadIO mb, MonadCatch mb, Medium mb m) => m -> Protocol ma mb z -> mb z
+algoB m p = algoA m $ flipProt p

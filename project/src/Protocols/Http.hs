@@ -8,7 +8,7 @@ import BlockingTimeout
 
 newtype HttpMiddleware = HttpMiddleware {respond :: String -> String}
 
-http :: (Medium ma, Interactive ma, Medium mb, ClientState (Maybe Int) mb, Interactive mb) => HttpMiddleware -> Protocol ma mb ()
+http :: (Monad ma, Interactive ma, Monad mb, ClientState (Maybe Int) mb, Interactive mb) => HttpMiddleware -> Protocol ma mb ()
 http mw = do
     mr <- timeoutB (do Just <$> readI) (return . respond mw) 60
     case mr of

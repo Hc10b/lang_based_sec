@@ -1,47 +1,49 @@
 {-# LANGUAGE GADTs #-}
-module MediumImpl where
+module Simulation.SequentialImpl where
 import ClientMonadClasses
 import Protocol
 import Data.Functor
+import Medium
+
 
 -- And there will also be function to decompose values of ProtocolM into the actual algorithms for A and B:
-algoA :: Interactive ma => Monad ma => Protocol ma mb z -> ma z
-algoA (Preshared a) = return a
-algoA (SendA2B f) = do
+algoA :: (Monad mb, Interactive ma) => Monad ma => Medium ma m => m -> Protocol ma mb z -> ma z
+algoA m (Preshared a) = return a
+algoA m (SendA2B f) = do
     z <- f
-    str <- send $ show z
+    str <- send m $ show z
     return $ read str
-algoA (SendB2A _) = recv <&> read
-algoA (BindP pz f) = do
-    z <- algoA pz
-    algoA (f z)
-algoA (LiftAC ma) = do ma
-algoA (LiftBC mb) = return ()
-algoA (CSend la lb ra rb) = do
-    maybeStrB <- maybeRecv
+algoA m (SendB2A _) = recv m <&> read
+algoA m (BindP pz f) = do
+    z <- algoA m pz
+    algoA m (f z)
+algoA m (LiftAC ma) = do ma
+algoA m (LiftBC mb) = return ()
+algoA m (CSend la lb ra rb) = do
+    maybeStrB <- maybeRecv m
     case maybeStrB of
         Nothing -> do
             maybeX <- la
             case maybeX of
-                Nothing -> algoA (CSend la lb ra rb)
+                Nothing -> algoA m (CSend la lb ra rb)
                 Just x -> do
-                    strA <- send (show x)
+                    strA <- send m (show x)
                     -- check, whether B will answer
                     case rb $ read strA of
                         Nothing -> return (Just $ read strA, Nothing)
                         Just _ -> do
-                            strB <- recv
+                            strB <- recv m
                             return (Just $ read strA, Just $ read strB)
         Just strB -> case ra (read strB) of
             Nothing -> return (Nothing, Just $ read strB)
             Just mx -> do
                 x <- mx
-                strA <- send (show x)
+                strA <- send m (show x)
                 return (Just $ read strA, Just $ read strB)
-algoA (Async txa txb rxa rxb sa sb) = loopT
+algoA m (Async txa txb rxa rxb sa sb) = loopT
     where
         loopR = do
-                mb <- maybeRecv
+                mb <- maybeRecv m
                 case mb of
                     Nothing -> loopT
                     Just strb ->
@@ -58,13 +60,13 @@ algoA (Async txa txb rxa rxb sa sb) = loopT
               Nothing -> loopR
               Just ca ->
                   do
-                      str <- send $ show ca
+                      str <- send m $ show ca
                       if sa $ read str then
                           wait_for_other (read str)
                       else
                           loopR
         wait_for_other this_sync = do
-            mb <- maybeRecv
+            mb <- maybeRecv m
             case mb of
               Nothing -> wait_for_other this_sync
               Just strb ->
@@ -79,7 +81,7 @@ algoA (Async txa txb rxa rxb sa sb) = loopT
             case ma of
               Just ca ->
                   do
-                      str <- send $ show ca
+                      str <- send m $ show ca
                       if sa $ read str then
                           return (read str, other_sync)
                       else
@@ -90,5 +92,5 @@ algoA (Async txa txb rxa rxb sa sb) = loopT
 
 
 
-algoB :: Interactive mb => Monad mb => Protocol ma mb z -> mb z
-algoB p = algoA $ flipProt p
+algoB :: (Monad ma, Interactive mb, Monad mb, Medium mb m) => m -> Protocol ma mb z -> mb z
+algoB m p = algoA m $ flipProt p
