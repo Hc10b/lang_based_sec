@@ -3,7 +3,7 @@
 
 module ClientMonadClasses where
 
-class Interactive m where
+class Monad m => Interactive m where
     outputI :: String -> m ()
     readI :: m String
     time :: m Int
