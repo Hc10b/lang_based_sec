@@ -8,9 +8,15 @@ import Control.Concurrent
 import Control.Monad.Catch
 import Control.Monad.State
 import Data.ByteString.Char8 (unpack)
-import qualified Nanomsg
+--import qualified Nanomsg
 import Nanomsg (Pair)
 import Medium
+import Control.Exception (throw)
+
+data PartyExitedException = PartyExitedException
+    deriving Show
+
+instance Exception PartyExitedException
 
 data GotMessageException = GotMessage
     deriving Show
@@ -45,22 +51,22 @@ algoA m (CSend la lb ra rb) = do
         case rb readA of
           Nothing -> do
               liftIO $ killThread remoteMessageWaitThread
-              return (Just readA, Nothing)
+              throw PartyExitedException
           Just mby -> do
               strY <- liftIO $ readMVar incomingMessage
-              return (Just readA, Just $ read strY)
+              return (readA, read strY)
         )
         (\GotMessage -> do
             strB <- liftIO $ readMVar incomingMessage
             let y = read strB
             case ra y of
-                            Nothing -> return (Nothing, Just y)
+                            Nothing -> throw PartyExitedException
                             Just max -> do
                                 x <- max
                                 let strX = show x
                                 let readX = read strX
                                 send m strX
-                                return (Just readX, Just y))
+                                return (readX, y))
 
 
     where

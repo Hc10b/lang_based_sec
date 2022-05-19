@@ -22,7 +22,7 @@ data Protocol ma mb z where
     --        L push public data into client monad
     LiftBC :: mb () -> Protocol ma mb ()
     -- possible sychronized concurrent messages of both sides
-    CSend :: (Show x, Read x, Show y, Read y) => ma (Maybe x) -> mb (Maybe y) -> (y -> Maybe (ma x)) -> (x -> Maybe (mb y)) -> Protocol ma mb (Maybe x, Maybe y)
+    CSend :: (Show x, Read x, Show y, Read y) => ma (Maybe x) -> mb (Maybe y) -> (y -> Maybe (ma x)) -> (x -> Maybe (mb y)) -> Protocol ma mb (x, y)
     --                                             ^               ^                      ^                        ^
     --                                             |               |                      |                        L PartyB's response to PartA's message if PartyB hasn't send by now. May refuse to answer.
     --                                             |               |                      L PartyA's response to PartB's message if PartyA hasn't send by now. May refuse to answer.
